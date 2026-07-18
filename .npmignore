@@ -1,0 +1,10 @@
+.gitignore
+.claude
+gulpfile.js
+src
+tests
+node_modules
+.editorconfig
+babel.config.json
+package-lock.json
+docs

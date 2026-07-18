@@ -1,0 +1,43 @@
+{
+  "name": "olum-store",
+  "version": "0.1.0",
+  "description": "A reactive store for olumjs library",
+  "main": "dist/store.js",
+  "directories": {
+    "dist": "dist"
+  },
+  "scripts": {
+    "build": "gulp",
+    "test": "node ./tests/store.test.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/olumjs/olum-store.git"
+  },
+  "keywords": [
+    "npm",
+    "olum",
+    "store",
+    "state",
+    "reactive",
+    "reactivity",
+    "olumjs",
+    "vanilla"
+  ],
+  "author": "Eissa Saber",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/olumjs/olum-store/issues"
+  },
+  "homepage": "https://github.com/olumjs/olum-store#readme",
+  "devDependencies": {
+    "@babel/core": "^7.14.6",
+    "@babel/preset-env": "^7.14.7",
+    "gulp": "^4.0.2",
+    "gulp-babel": "^8.0.0",
+    "gulp-concat": "^2.6.1",
+    "gulp-header": "^2.0.9",
+    "gulp-uglify": "^3.0.2",
+    "jsdom": "^29.1.1"
+  }
+}
