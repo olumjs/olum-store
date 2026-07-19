@@ -7,7 +7,7 @@ that repo's `docs/` directory (keeping the slug filename, e.g. `docs/router.md`)
 The site later pulls them per a manifest entry:
 
 ```ts
-{ slug: "store", repo: "olumjs/olum-store", path: "docs/store.md" }
+{ slug: "router", repo: "olumjs/olum-router", path: "docs/router.md" }
 // ref is resolved to the repo's DEFAULT BRANCH at fetch time
 ```
 
