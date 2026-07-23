@@ -11,7 +11,7 @@ Olum has three ways to get data into a component. They compose — most apps use
 | **Scope** | one component | parent → child | the whole app |
 | **Defined in** | the component | the parent's template | a plain `.js` module |
 | **Who writes it** | the component itself | nobody — read-only | anyone who imports it |
-| **Re-render timing** | synchronous, per mutation | with the parent | microtask-batched |
+| **Re-render timing** | microtask-batched | with the parent | microtask-batched |
 | **Lifetime** | dies with the component | dies with the child | as long as the app runs |
 
 ## Rules of thumb

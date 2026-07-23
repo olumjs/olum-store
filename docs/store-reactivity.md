@@ -39,7 +39,7 @@ Writes that change nothing are skipped: setting a key to the value it already ha
 
 ## Writes are microtask-batched
 
-Component `state` emits synchronously, once per mutation. The store instead **collects every write in the current tick and paints once**, on the next microtask:
+Every store write in the current tick is **collected and painted once**, on the next microtask:
 
 ```js
 export const cart = store({
@@ -53,6 +53,6 @@ export const cart = store({
 });
 ```
 
-This is why the store is the right home for **large or frequently-mutated collections**: even an in-place `splice` on a huge array — which under component `state` costs one synchronous rebuild per shifted element — paints exactly once.
+Component `state` batches the same way — several mutations in a tick, or an in-place `splice` on a big array, all coalesce into a single re-render pass. So the store is **not** faster than `state` for large collections; reach for it because the data is **shared**, not for performance. See [Store vs State](/docs/store-vs-state).
 
 The flip side: the DOM is not updated **immediately** after a write. If code right after a mutation needs to read the updated DOM, wait a microtask first (`await Promise.resolve()`).

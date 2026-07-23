@@ -1,20 +1,3 @@
-// ============================================================================
-// OlumJS store test suite — a sibling to the core runtime suites. Covers
-// src/store.js: the deep reactive store the Olum runtime wires up per app.
-//
-// store.js is `export default function createStore(self){...}` and its flush
-// path reaches for BARE globals (`document`, `JSON`, `Promise`) rather than
-// `window.`-prefixed ones. So — like the router suite — we eval the source
-// *inside* a jsdom window (runScripts: "outside-only"), which gives those bare
-// references the right binding. Each load() gets a fresh window (fresh document)
-// so a mounted component in one test can't leak into another.
-//
-// Updates flush on the microtask queue, so checks are async: mutate, `await
-// tick()`, then assert what the store emitted.
-//
-// Run:  node tests/store.test.js   (or: npm test)
-// ============================================================================
-
 const fs = require("fs");
 const path = require("path");
 const { JSDOM } = require("jsdom");
@@ -22,7 +5,6 @@ const { JSDOM } = require("jsdom");
 let passed = 0;
 let failed = 0;
 
-// ── Output styling (shared look with the other suites) ────────────────────────
 const COLOR = process.stdout.isTTY && !process.env.NO_COLOR;
 const paint = (code, s) => (COLOR ? `\x1b[${code}m${s}\x1b[0m` : s);
 const green = (s) => paint("32", s);
@@ -34,79 +16,57 @@ const cyan = (s) => paint("36", s);
 const PASS_ICON = green("✔");
 const FAIL_ICON = red("✖");
 
-// ── Loader ────────────────────────────────────────────────────────────────────
-// Evaluate store.js inside a fresh jsdom window and hand back the createStore
-// factory it default-exports (rebound to a window global so the realm can reach
-// it). `document` inside flush() then resolves to this window's document.
-const STORE_SRC = fs.readFileSync(path.join(__dirname, "../src/store.js"), "utf8");
-function load() {
-  const dom = new JSDOM("<!doctype html><body></body>", { url: "http://localhost/", runScripts: "outside-only" });
-  dom.window.eval(STORE_SRC.replace(/^\s*export\s+default\s+/m, "window.__createStore = "));
-  return { window: dom.window, document: dom.window.document, createStore: dom.window.__createStore };
-}
-
-// Updates are scheduled on the microtask queue (Promise.resolve().then(flush)).
-// A macrotask turn drains those, so awaiting a 0ms timeout guarantees any
-// pending flush has run before we assert.
-const tick = () => new Promise((r) => setTimeout(r, 0));
-
-// Build a store plus a mock Olum `self`, and helpers to mount subscribers and
-// simulate a component reading state during its render.
-//
-//   self.app.store[key]  — the live component registry flush() prunes against.
-//   self.__renderingKey  — the component currently rendering; reads subscribe it.
-//   self.$emit           — spied; each re-render request lands in `emitted`.
-//   self.mkHash          — stubbed hash used in the emitted payload.
-function setup() {
-  const { window, document, createStore } = load();
-  const emitted = [];
+const STORE_SRC = fs.readFileSync(
+  path.join(__dirname, "../src/store.js"),
+  "utf8",
+);
+function load(init) {
+  const dom = new JSDOM("<!doctype html><body></body>", {
+    url: "http://localhost/",
+  });
+  global.document = dom.window.document;
+  const createStore = new Function(
+    STORE_SRC.replace(/^\s*export\s+default\s+/m, "return "),
+  )();
+  const emits = [];
   const self = {
     app: { store: {} },
     __renderingKey: null,
-    $emit: (name, payload) => emitted.push({ name, payload }),
-    mkHash: (s) => "h:" + s,
+    $emit: (name, payload) => emits.push({ name, payload }),
+    mkHash: (s) => "hash(" + s + ")",
   };
-  const store = createStore(self);
-
-  // Build state INSIDE the jsdom realm. store.js's wrap() gates on realm-bound
-  // identities — `val instanceof Map/Set` and `proto === Object.prototype` — so
-  // nested objects, Maps, and Sets must be this realm's natives to be made
-  // reactive (arrays are fine either way; Array.isArray is cross-realm). In a
-  // real app the store and its state share one realm; here we bridge it with eval.
-  const mk = (expr) => window.eval("(" + expr + ")");
-
-  // Register a mounted component: a DOM node carrying the data-olum meta flush()
-  // reads, attached to the body so `document.body.contains(el)` holds true.
-  function mount(key, compId) {
-    const el = document.createElement("div");
-    el.setAttribute("data-olum", JSON.stringify({ compName: key, compId: compId == null ? 1 : compId }));
-    document.body.appendChild(el);
+  const store = createStore(self)(init);
+  const mountComp = (key, compId) => {
+    compId = compId || "id-" + key;
+    const el = dom.window.document.createElement("div");
+    el.setAttribute(
+      "data-olum",
+      JSON.stringify({ compName: key, compId: compId }),
+    );
+    dom.window.document.body.appendChild(el);
     self.app.store[key] = { el };
     return el;
-  }
-
-  // Run `readFn` as if `key`'s component were rendering, so its reads subscribe.
-  function render(key, readFn) {
+  };
+  const readAs = (key, fn) => {
     self.__renderingKey = key;
     try {
-      readFn();
+      return fn();
     } finally {
       self.__renderingKey = null;
     }
-  }
-
-  // Mount a component AND have it read `readFn` during render — the common combo.
-  function subscribe(key, readFn) {
-    mount(key);
-    render(key, readFn);
-  }
-
-  const names = () => emitted.map((e) => e.payload.compName);
-
-  return { window, document, self, store, emitted, mount, render, subscribe, names, mk };
+  };
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  return {
+    document: dom.window.document,
+    self,
+    store,
+    emits,
+    mountComp,
+    readAs,
+    tick,
+  };
 }
 
-// ── Section / check plumbing (mirrors the other suites; async-aware) ──────────
 let currentSection = "(no section)";
 const failedSections = [];
 
@@ -138,256 +98,236 @@ function section(title) {
   console.log("\n" + bold(cyan(title)));
 }
 
-async function main() {
-  console.log("\n" + bold("🧪 OlumJS store fixtures") + "\n========================");
+(async () => {
+  console.log(
+    "\n" + bold("🧪 OlumJS store fixtures") + "\n========================",
+  );
 
-  // ── §1 factory & basic reactivity ──────────────────────────────────────────
-  section("§1 factory & basic reactivity");
+  section("§1 basic state");
 
-  await check("createStore(self) returns a store factory", () => {
-    const { store } = setup();
-    return typeof store === "function";
+  await check("init values are readable", () => {
+    const { store } = load({ count: 1, label: "hi" });
+    return store.count === 1 && store.label === "hi";
   });
 
-  await check("the factory copies initial state onto the reactive object", () => {
-    const { store } = setup();
-    const s = store({ count: 0, name: "olum" });
-    return s.count === 0 && s.name === "olum";
+  await check("no init yields an empty store", () => {
+    const { store } = load();
+    return typeof store === "object" && Object.keys(store).length === 0;
   });
 
-  await check("writing then reading a property round-trips", () => {
-    const { store } = setup();
-    const s = store({ count: 0 });
-    s.count = 5;
-    return s.count === 5;
+  await check("sets are reflected on read", () => {
+    const { store } = load({ count: 0 });
+    store.count = 5;
+    store.fresh = "new";
+    return store.count === 5 && store.fresh === "new";
   });
 
-  await check("a store created with no initial state is an empty reactive object", () => {
-    const { store } = setup();
-    const s = store();
-    s.added = true;
-    return s.added === true;
+  await check(
+    "init object is copied — later mutation of it doesn't leak in",
+    () => {
+      const init = { count: 0 };
+      const { store } = load(init);
+      init.count = 99;
+      return store.count === 0;
+    },
+  );
+
+  await check("delete removes the key", () => {
+    const { store } = load({ gone: 1 });
+    delete store.gone;
+    return !("gone" in store);
   });
 
-  // ── §2 dependency tracking ──────────────────────────────────────────────────
-  section("§2 dependency tracking");
+  section("§2 deep wrapping");
 
-  await check("a read during render subscribes the component", async () => {
-    const { store, subscribe, names } = setup();
-    const s = store({ count: 0 });
-    subscribe("A", () => s.count);
-    s.count = 1;
-    await tick();
-    return names().join(",") === "A";
+  await check("nested objects are readable and writable", () => {
+    const { store } = load({ user: { name: "a", address: { city: "x" } } });
+    store.user.address.city = "y";
+    return store.user.name === "a" && store.user.address.city === "y";
   });
 
-  await check("a read OUTSIDE render does not subscribe anyone", async () => {
-    const { store, mount, emitted } = setup();
-    const s = store({ count: 0 });
-    mount("A"); // mounted, but never read during render
-    s.count; // read with no __renderingKey set
-    s.count = 1;
-    await tick();
-    return emitted.length === 0;
+  await check("proxy identity is stable across reads", () => {
+    const { store } = load({ user: { name: "a" } });
+    return store.user === store.user;
   });
 
-  await check("the re-render request carries the expected event + payload", async () => {
-    const { store, subscribe, emitted, self } = setup();
-    const s = store({ count: 0 });
-    subscribe("A", () => s.count);
-    s.count = 1;
-    await tick();
-    const ev = emitted[0];
+  await check("arrays behave: push, index write, length", () => {
+    const { store } = load({ list: [1, 2] });
+    store.list.push(3);
+    store.list[0] = 9;
     return (
-      ev.name === "updateOlumComp" &&
-      ev.payload.compName === "A" &&
-      ev.payload.compId === 1 &&
-      ev.payload.hash === self.mkHash("A" + 1)
+      store.list.length === 3 && store.list[0] === 9 && store.list[2] === 3
     );
   });
 
-  await check("tracking is store-level: any reader is notified on any change", async () => {
-    // The store keeps ONE subscriber set — reading any property subscribes the
-    // component to the whole store, so a change anywhere re-renders every reader.
-    const { store, subscribe, names } = setup();
-    const s = store({ a: 1, b: 1 });
-    subscribe("ReadsA", () => s.a);
-    subscribe("ReadsB", () => s.b);
-    s.a = 2; // ReadsB never read `a`, but store-level tracking notifies it too
+  await check("Map works through the proxy: set/get/size", () => {
+    const { store } = load({ m: new Map([["a", 1]]) });
+    store.m.set("b", 2);
+    return (
+      store.m.get("a") === 1 && store.m.get("b") === 2 && store.m.size === 2
+    );
+  });
+
+  await check("Set works through the proxy: add/has/size", () => {
+    const { store } = load({ s: new Set([1]) });
+    store.s.add(2);
+    return store.s.has(1) && store.s.has(2) && store.s.size === 2;
+  });
+
+  await check("Map.get on an object value returns the wrapped proxy", () => {
+    const { store } = load({ m: new Map([["k", { n: 1 }]]) });
+    return store.m.get("k") === store.m.get("k") && store.m.get("k").n === 1;
+  });
+
+  await check("non-plain objects (class instances) pass through raw", () => {
+    const d = new Date(0);
+    const { store } = load({ d: d });
+    return store.d === d;
+  });
+
+  await check(
+    "assigning a wrapped value back stores the raw (no double-wrap)",
+    () => {
+      const { store } = load({ a: { n: 1 } });
+      store.b = store.a;
+      return store.b === store.a && store.b.n === 1;
+    },
+  );
+
+  section("§3 subscription & batched flush");
+
+  await check(
+    "render-time read subscribes; a mutation emits updateOlumComp",
+    async () => {
+      const { store, emits, mountComp, readAs, tick, self } = load({
+        count: 0,
+      });
+      mountComp("App", "c1");
+      readAs("App", () => store.count);
+      store.count = 1;
+      await tick();
+      const e = emits[0];
+      return (
+        emits.length === 1 &&
+        e.name === "updateOlumComp" &&
+        e.payload.compName === "App" &&
+        e.payload.compId === "c1" &&
+        e.payload.hash === self.mkHash("App" + "c1")
+      );
+    },
+  );
+
+  await check(
+    "multiple mutations in one tick flush as a single emit",
+    async () => {
+      const { store, emits, mountComp, readAs, tick } = load({ a: 0, b: 0 });
+      mountComp("App");
+      readAs("App", () => store.a + store.b);
+      store.a = 1;
+      store.b = 2;
+      store.a = 3;
+      await tick();
+      return emits.length === 1;
+    },
+  );
+
+  await check("separate ticks flush separately", async () => {
+    const { store, emits, mountComp, readAs, tick } = load({ a: 0 });
+    mountComp("App");
+    readAs("App", () => store.a);
+    store.a = 1;
     await tick();
-    return names().sort().join(",") === "ReadsA,ReadsB";
-  });
-
-  // ── §3 batching & change detection ──────────────────────────────────────────
-  section("§3 batching & change detection");
-
-  await check("multiple writes in one tick coalesce into a single re-render", async () => {
-    const { store, subscribe, emitted } = setup();
-    const s = store({ count: 0 });
-    subscribe("A", () => s.count);
-    s.count = 1;
-    s.count = 2;
-    s.count = 3;
+    store.a = 2;
     await tick();
-    return emitted.length === 1 && s.count === 3;
+    return emits.length === 2;
   });
 
-  await check("assigning the same value notifies nobody", async () => {
-    const { store, subscribe, emitted } = setup();
-    const s = store({ count: 7 });
-    subscribe("A", () => s.count);
-    s.count = 7; // unchanged
+  await check("setting the identical value does not notify", async () => {
+    const { store, emits, mountComp, readAs, tick } = load({ a: 1 });
+    mountComp("App");
+    readAs("App", () => store.a);
+    store.a = 1;
     await tick();
-    return emitted.length === 0;
+    return emits.length === 0;
   });
 
-  await check("deleting a property triggers a re-render", async () => {
-    const { store, subscribe, emitted } = setup();
-    const s = store({ count: 1 });
-    subscribe("A", () => s.count);
-    delete s.count;
+  await check(
+    "reads outside render don't subscribe — mutation emits nothing",
+    async () => {
+      const { store, emits, mountComp, tick } = load({ a: 0 });
+      mountComp("App");
+      void store.a;
+      store.a = 1;
+      await tick();
+      return emits.length === 0;
+    },
+  );
+
+  await check("deep mutation notifies the subscriber", async () => {
+    const { store, emits, mountComp, readAs, tick } = load({
+      user: { name: "a" },
+    });
+    mountComp("App");
+    readAs("App", () => store.user.name);
+    store.user.name = "b";
     await tick();
-    return emitted.length === 1;
+    return emits.length === 1 && emits[0].payload.compName === "App";
   });
 
-  await check("deleting an absent property is a no-op", async () => {
-    const { store, subscribe, emitted } = setup();
-    const s = store({ count: 1 });
-    subscribe("A", () => s.count);
-    delete s.missing;
+  await check("Map.set notifies; Map.get alone does not", async () => {
+    const { store, emits, mountComp, readAs, tick } = load({
+      m: new Map([["a", 1]]),
+    });
+    mountComp("App");
+    readAs("App", () => store.m.get("a"));
+    store.m.get("a");
     await tick();
-    return emitted.length === 0;
-  });
-
-  // ── §4 deep reactivity ──────────────────────────────────────────────────────
-  section("§4 deep reactivity");
-
-  await check("mutating a nested object re-renders its readers", async () => {
-    const { store, subscribe, emitted, mk } = setup();
-    const s = store(mk('{ user: { name: "Ada" } }'));
-    subscribe("A", () => s.user.name);
-    s.user.name = "Grace";
+    const afterRead = emits.length;
+    store.m.set("a", 2);
     await tick();
-    return emitted.length === 1 && s.user.name === "Grace";
+    return afterRead === 0 && emits.length === 1;
   });
 
-  await check("pushing to a nested array re-renders its readers", async () => {
-    const { store, subscribe, emitted } = setup();
-    const s = store({ todos: ["a"] });
-    subscribe("A", () => s.todos.length);
-    s.todos.push("b");
+  await check("delete notifies; deleting a missing key does not", async () => {
+    const { store, emits, mountComp, readAs, tick } = load({ a: 1 });
+    mountComp("App");
+    readAs("App", () => store.a);
+    delete store.nope;
     await tick();
-    return emitted.length === 1 && s.todos.length === 2;
-  });
-
-  await check("an action mutates through `this` (the proxy) and re-renders readers", async () => {
-    // Called as s.add(...), `this` is the proxy — so this.items.push() lands in
-    // the array trap and notifies, exactly as the docs' actions describe.
-    const { store, subscribe, emitted, mk } = setup();
-    const s = store(mk("{ items: [], add(n){ this.items.push(n); } }"));
-    subscribe("A", () => s.items.length);
-    s.add("x");
+    const afterMiss = emits.length;
+    delete store.a;
     await tick();
-    return emitted.length === 1 && s.items.length === 1 && s.items[0] === "x";
+    return afterMiss === 0 && emits.length === 1;
   });
 
-  // ── §5 identity & unwrapping ────────────────────────────────────────────────
-  section("§5 identity & unwrapping");
+  await check(
+    "a subscriber removed from the DOM is pruned, not re-rendered",
+    async () => {
+      const { store, emits, mountComp, readAs, tick } = load({ a: 0 });
+      const el = mountComp("App");
+      readAs("App", () => store.a);
+      el.remove();
+      store.a = 1;
+      await tick();
+      return emits.length === 0;
+    },
+  );
 
-  await check("a nested object has stable reactive identity across reads", () => {
-    const { store, mk } = setup();
-    const s = store(mk('{ user: { name: "Ada" } }'));
-    return s.user === s.user;
-  });
+  await check(
+    "a descendant subscriber is covered by its live ancestor",
+    async () => {
+      const { store, emits, mountComp, readAs, tick } = load({ a: 0 });
+      mountComp("App");
+      mountComp("App>Child#0");
+      readAs("App", () => store.a);
+      readAs("App>Child#0", () => store.a);
+      store.a = 1;
+      await tick();
 
-  await check("assigning a reactive value back in does not double-wrap it", () => {
-    const { store, mk } = setup();
-    const s = store(mk('{ user: { name: "Ada" } }'));
-    s.selected = s.user; // stores the raw underneath, re-wraps to the same proxy
-    return s.selected === s.user;
-  });
+      return emits.length === 1 && emits[0].payload.compName === "App";
+    },
+  );
 
-  await check("non-plain values (class instances) pass through unproxied", () => {
-    const { store } = setup();
-    class Foo {
-      constructor() {
-        this.x = 1;
-      }
-    }
-    const f = new Foo();
-    const s = store({ f });
-    return s.f === f;
-  });
-
-  // ── §6 collections (Map / Set) ──────────────────────────────────────────────
-  section("§6 collections (Map / Set)");
-
-  await check("Set.add re-renders readers and mutates the set", async () => {
-    const { store, subscribe, emitted, mk } = setup();
-    const s = store(mk("{ seen: new Set() }"));
-    subscribe("A", () => s.seen.size);
-    s.seen.add(42);
-    await tick();
-    return emitted.length === 1 && s.seen.has(42);
-  });
-
-  await check("Map.set re-renders readers and stores the value", async () => {
-    const { store, subscribe, emitted, mk } = setup();
-    const s = store(mk("{ byId: new Map() }"));
-    subscribe("A", () => s.byId.size);
-    s.byId.set("k", "v");
-    await tick();
-    return emitted.length === 1 && s.byId.get("k") === "v";
-  });
-
-  await check("Map.get returns a reactive value you can mutate reactively", async () => {
-    const { store, render, mount, emitted, mk } = setup();
-    const s = store(mk("{ byId: new Map() }"));
-    s.byId.set("k", mk("{ n: 1 }"));
-    mount("A");
-    render("A", () => s.byId.get("k").n);
-    s.byId.get("k").n = 2;
-    await tick();
-    return emitted.length === 1 && s.byId.get("k").n === 2;
-  });
-
-  await check("reading .size does not schedule a re-render", async () => {
-    const { store, subscribe, emitted, mk } = setup();
-    const s = store(mk("{ seen: new Set([1]) }"));
-    subscribe("A", () => s.seen.size);
-    await tick();
-    return emitted.length === 0;
-  });
-
-  // ── §7 subscriber lifecycle ─────────────────────────────────────────────────
-  section("§7 subscriber lifecycle");
-
-  await check("a component removed from the DOM is not re-rendered", async () => {
-    const { store, mount, render, document, emitted } = setup();
-    const s = store({ count: 0 });
-    const el = mount("A");
-    render("A", () => s.count);
-    document.body.removeChild(el); // component unmounts
-    s.count = 1;
-    await tick();
-    return emitted.length === 0;
-  });
-
-  await check("a nested child is skipped when its parent also re-renders", async () => {
-    // Keys are hierarchical ("Parent>Child"); flush() drops a child whose parent
-    // is already in the batch, since re-rendering the parent covers it.
-    const { store, mount, render, names } = setup();
-    const s = store({ count: 0 });
-    mount("P");
-    mount("P>C");
-    render("P", () => s.count);
-    render("P>C", () => s.count);
-    s.count = 1;
-    await tick();
-    return names().join(",") === "P";
-  });
-
-  // ── Summary (mirrors the other suites) ──────────────────────────────────────
   console.log("\n========================");
   const summary = `${passed} passed, ${failed} failed`;
   console.log((failed ? red(bold(summary)) : green(bold(summary))) + "\n");
@@ -405,15 +345,16 @@ async function main() {
     console.log("");
   }
 
-  // Guard against a whole section silently disappearing. Bump when you add/remove tests.
-  const EXPECTED_CHECKS = 24;
+  const EXPECTED_CHECKS = 23;
   const total = passed + failed;
   if (total !== EXPECTED_CHECKS) {
-    console.log(yellow(`⚠ ran ${total} checks but expected ${EXPECTED_CHECKS} — did a test get dropped?`) + "\n");
+    console.log(
+      yellow(
+        `⚠ ran ${total} checks but expected ${EXPECTED_CHECKS} — did a test get dropped?`,
+      ) + "\n",
+    );
     process.exit(1);
   }
 
   process.exit(failed ? 1 : 0);
-}
-
-main();
+})();

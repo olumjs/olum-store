@@ -1,10 +1,10 @@
 export default function createStore(self) {
   return (init) => {
     const target = {};
-    const subs = new Set(); // runtime instance keys of components that read this store during render
+    const subs = new Set();
     let scheduled = false;
-    const proxies = new WeakMap(); // raw object -> proxy: wrap each object once so identity stays stable
-    const raws = new WeakMap(); // proxy -> raw object: unwrap values assigned back into the store
+    const proxies = new WeakMap();
+    const raws = new WeakMap();
 
     function flush() {
       scheduled = false;
@@ -12,9 +12,8 @@ export default function createStore(self) {
       const live = [];
       subs.forEach(function (key) {
         const c = appStore[key];
-        if (!c || !c.el || !document.body.contains(c.el)) {
+        if (!c || !c.el || !document.body.contains(c.el))
           return subs.delete(key);
-        }
         live.push(key);
       });
       live.forEach(function (key) {
@@ -23,7 +22,7 @@ export default function createStore(self) {
         });
         if (covered) return;
         const c = appStore[key];
-        const meta = JSON.parse(c.el.getAttribute("data-olum")); // { compName, compId } set by mkElm
+        const meta = JSON.parse(c.el.getAttribute("data-olum"));
         self.$emit("updateOlumComp", {
           compName: key,
           compId: meta.compId,
@@ -62,18 +61,16 @@ export default function createStore(self) {
       },
     };
 
-    // Map/Set methods read internal slots, which proxies can't forward — so every method is
-    // rebound to run against the raw collection: mutators notify, Map.get results are wrapped.
     const collectionMutators = ["set", "add", "delete", "clear"];
     const collectionHandler = {
       get: function (coll, key) {
         track();
         const val = coll[key];
-        if (typeof val !== "function") return val; // e.g. size
+        if (typeof val !== "function") return val;
         return function (...args) {
           const result = val.apply(
             coll,
-            args.map((a) => raws.get(a) || a)
+            args.map((a) => raws.get(a) || a),
           );
           if (collectionMutators.includes(key)) notify();
           return key === "get" ? wrap(result) : result;
@@ -81,8 +78,6 @@ export default function createStore(self) {
       },
     };
 
-    // deep reactivity is limited to what can safely cross a proxy: plain objects, arrays,
-    // Map, Set. Anything else (Date, DOM nodes, class instances...) passes through raw.
     function wrap(val) {
       if (val === null || typeof val !== "object") return val;
       const isCollection = val instanceof Map || val instanceof Set;
