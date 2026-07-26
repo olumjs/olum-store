@@ -5,10 +5,14 @@ order: 230
 ---
 
 :::note[Package]
-`store` ships in the separate `olum-store` package — `npm i olum-store` at the project
-root (already included in the starter template). `olum` auto-loads it, so there's nothing
-else to set up; if the package is removed, calling `store()` throws `"store is unavailable"`
-and the rest of the framework keeps working.
+`store` ships in the separate `olum-store` package (already included in the starter template):
+
+```bash
+npm i olum-store
+```
+
+`olum` auto-loads it, so there's nothing else to set up; if the package is removed, calling
+`store()` throws `"store is unavailable"` and the rest of the framework keeps working.
 :::
 
 Component [`state`](/docs/state) lives and dies with its component. For state **shared across components** — a cart, the signed-in user, app settings — Olum ships a zustand-style global store: define it **once** in a plain `.js` module, import it anywhere, and every component that reads it re-renders automatically when it changes.
