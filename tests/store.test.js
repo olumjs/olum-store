@@ -17,7 +17,7 @@ const PASS_ICON = green("✔");
 const FAIL_ICON = red("✖");
 
 const STORE_SRC = fs.readFileSync(
-  path.join(__dirname, "../src/store.js"),
+  path.join(__dirname, "../core/store.js"),
   "utf8",
 );
 function load(init) {
