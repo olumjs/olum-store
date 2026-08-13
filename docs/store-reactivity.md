@@ -55,4 +55,13 @@ export const cart = store({
 
 Component `state` batches the same way — several mutations in a tick, or an in-place `splice` on a big array, all coalesce into a single re-render pass. So the store is **not** faster than `state` for large collections; reach for it because the data is **shared**, not for performance. See [Store vs State](/docs/store-vs-state).
 
-The flip side: the DOM is not updated **immediately** after a write. If code right after a mutation needs to read the updated DOM, wait a microtask first (`await Promise.resolve()`).
+The flip side: the DOM is not updated **immediately** after a write. A store write settles in **two** hops — one microtask coalesces the writes and notifies subscribers, the next runs their re-render. So a single `await Promise.resolve()` is not enough; settle the pending re-renders explicitly instead:
+
+```js
+cart.add("Rope");
+await Promise.resolve();       // store notifies its subscribers
+window.olum.flushUpdates();    // run their pending re-renders NOW
+host.querySelector("li");      // fresh
+```
+
+Awaiting a macrotask (`await new Promise((r) => setTimeout(r))`) drains both hops too. Either way this is mostly a testing concern — inside a component you never need it, since the next render already sees the new value.
