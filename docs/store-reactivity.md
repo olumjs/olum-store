@@ -58,9 +58,11 @@ Component `state` batches the same way — several mutations in a tick, or an in
 The flip side: the DOM is not updated **immediately** after a write. A store write settles in **two** hops — one microtask coalesces the writes and notifies subscribers, the next runs their re-render. So a single `await Promise.resolve()` is not enough; settle the pending re-renders explicitly instead:
 
 ```js
+import { flushUpdates } from "olum";
+
 cart.add("Rope");
 await Promise.resolve();       // store notifies its subscribers
-window.olum.flushUpdates();    // run their pending re-renders NOW
+flushUpdates();                // run their pending re-renders NOW
 host.querySelector("li");      // fresh
 ```
 
