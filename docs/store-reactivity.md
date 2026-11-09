@@ -1,69 +1,71 @@
 ---
 title: Store Reactivity & Batching
 group: Store
-order: 240
+order: 20
 ---
 
-The store follows the same deep-reactivity rules as [component state](/docs/state), with one deliberate difference in **when** re-renders happen: store writes are batched.
+How a store updates your components: which ones update, which changes are tracked, and when the page changes. It follows the same rules as [component state](/docs/core/state).
 
-## Subscriptions are automatic
+## Following a store is automatic
 
-A component subscribes to a store by **reading it while rendering** — an interpolation, a directive expression, anything the template evaluates:
+A component follows a store by **reading it in its template**:
 
 ```html title="Basket.html"
 <script>
   import { cart } from "./store";
 </script>
 
-<p>{cart.items.length} items</p>  <!-- this read subscribes Basket to cart -->
+<p>{cart.items.length} items</p>  <!-- this read makes Basket follow cart -->
 ```
 
-There's nothing to clean up: when a subscribed component leaves the DOM, its subscription is dropped on the next store change. And if a parent and its child both read the same store, only the **parent** re-renders — re-rendering it rebuilds the child anyway, so the work isn't done twice.
+- Nothing to clean up: when a component is removed, it stops following on the next store change.
+- If a parent and its child both read the same store, only the **parent** updates (which updates the child too), so the work isn't done twice.
 
-## Reactivity is deep
-
-Nested plain objects, arrays, `Map` and `Set` are all tracked — mutate them in place and subscribers re-render:
+## Changes at any depth work
 
 ```js
-cart.items.push(item);           // ✓ in-place array method
+cart.items.push(item);           // ✓ array methods
 cart.items[0].qty = 2;           // ✓ any depth
 cart.meta.coupon = "SAVE10";     // ✓ nested object
-cart.tags.add("gift");           // ✓ Map/Set mutators
+cart.tags.add("gift");           // ✓ Map / Set
 ```
 
-Non-plain objects (`Date`, DOM nodes, class instances) pass through **untracked** — after changing one, assign it back to its key to trigger a re-render.
+Other objects (`Date`, DOM elements, class instances) are **not** tracked. After changing one, assign a **new** value to its key.
 
 :::warn
-Writes that change nothing are skipped: setting a key to the value it already has (including re-assigning the **same reference**, `cart.items = cart.items`) does not re-render. To force a refresh, assign a fresh object or array (spread, `map`, `filter`, `slice`, …).
+A change that changes nothing is skipped. Assigning the same value, or the **same** object back (`cart.items = cart.items`), does nothing. To force an update, assign a new array or object (`[...arr]`, `map`, `filter`, `slice`, `{ ...obj }`).
 :::
 
-## Writes are microtask-batched
+## Changes are grouped
 
-Every store write in the current tick is **collected and painted once**, on the next microtask:
+All store changes made together are applied in **one** update:
 
 ```js
 export const cart = store({
   items: [],
+  meta: { coupon: null, lastOrder: null },
   checkout() {
     this.items = [];
     this.meta.coupon = null;
     this.meta.lastOrder = Date.now();
-    // three writes, ONE re-render
+    // three changes, ONE update
   },
 });
 ```
 
-Component `state` batches the same way — several mutations in a tick, or an in-place `splice` on a big array, all coalesce into a single re-render pass. So the store is **not** faster than `state` for large collections; reach for it because the data is **shared**, not for performance. See [Store vs State](/docs/store-vs-state).
+Component `state` is grouped the same way, so a store is **not** faster than `state` for big lists. Use a store because data is **shared**, not for speed. See [Store vs State](/docs/store-vs-state).
 
-The flip side: the DOM is not updated **immediately** after a write. A store write settles in **two** hops — one microtask coalesces the writes and notifies subscribers, the next runs their re-render. So a single `await Promise.resolve()` is not enough; settle the pending re-renders explicitly instead:
+### Reading the page right after a change
+
+The page updates a moment **after** a store change, in two steps: first the store tells its components, then they update. One `await Promise.resolve()` isn't enough. Do this instead:
 
 ```js
 import { flushUpdates } from "olum";
 
 cart.add("Rope");
-await Promise.resolve();       // store notifies its subscribers
-flushUpdates();                // run their pending re-renders NOW
-host.querySelector("li");      // fresh
+await Promise.resolve();       // the store tells its components
+flushUpdates();                // apply their updates now
+host.querySelector("li");      // up to date
 ```
 
-Awaiting a macrotask (`await new Promise((r) => setTimeout(r))`) drains both hops too. Either way this is mostly a testing concern — inside a component you never need it, since the next render already sees the new value.
+Waiting for a timer (`await new Promise((r) => setTimeout(r))`) also works. You mostly need this in tests: inside a component, the next update already shows the new value.

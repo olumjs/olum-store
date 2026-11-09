@@ -1,21 +1,20 @@
 ---
 title: Global Store
 group: Store
-order: 230
+order: 10
 ---
 
+A component's [`state`](/docs/core/state) belongs to that component only, and is gone when it's removed. For data **shared by many components** (a cart, the logged-in user, settings), use a **store**: create it once in a `.js` file, import it anywhere, and every component that shows it updates when it changes.
+
 :::note[Package]
-`store` ships in the separate `olum-store` package (already included in the starter template):
+`store` comes from the `olum-store` package (already in the starter template):
 
 ```bash
 npm i olum-store
 ```
 
-`olum` auto-loads it, so there's nothing else to set up; if the package is removed, calling
-`store()` throws `"store is unavailable"` and the rest of the framework keeps working.
+`olum` loads it for you, nothing to set up. If you remove the package, calling `store()` throws `"store is unavailable"`, and everything else keeps working.
 :::
-
-Component [`state`](/docs/state) lives and dies with its component. For state **shared across components** — a cart, the signed-in user, app settings — Olum ships a zustand-style global store: define it **once** in a plain `.js` module, import it anywhere, and every component that reads it re-renders automatically when it changes.
 
 ```js title="store.js"
 import { store } from "olum";
@@ -31,7 +30,9 @@ export const cart = store({
 });
 ```
 
-State and the actions that mutate it live in the **same object** — methods reach the state through `this`. Then any component, in any file, imports it like a normal module. One component writes:
+The data and the functions that change it (**actions**) live in the same object. Actions reach the data with `this`.
+
+One component changes the store:
 
 ```html title="Shelf.html"
 <script>
@@ -45,7 +46,7 @@ State and the actions that mutate it live in the **same object** — methods rea
 </for>
 ```
 
-…and a different component reads — always in sync, with no props and no event forwarding:
+…and a completely different component shows it, always in sync, with no props:
 
 ```html title="Basket.html"
 <script>
@@ -67,28 +68,28 @@ State and the actions that mutate it live in the **same object** — methods rea
 </if>
 ```
 
-No providers, no wiring: a component **subscribes by reading** the store during render. When the store changes, every subscribed component still in the DOM re-renders; components that only *write* (and never read) are untouched.
+No setup needed: a component follows the store just by **reading it in its template**. When the store changes, those components update. Components that only change the store (and never show it) are not updated.
 
 :::tip
-A store module is just a `.js` file — only `page.html` files become routes, so keep it wherever it reads best: next to the pages that share it, or in `utils/` for app-wide stores.
+A store is just a `.js` file (only `page.html` files become routes), so put it wherever makes sense: next to the pages that use it, or in `utils/` for app-wide stores.
 :::
 
 ## Actions
 
-Use **method shorthand** (`add() {}`), not arrow functions — arrows don't bind `this`, so they can't reach the store's state:
+Write actions as **methods** (`add() {}`), not arrow functions. Arrow functions don't have the right `this`:
 
 ```js
 export const cart = store({
   items: [],
-  add(item) { this.items.push(item); },     // ✓ method — `this` is the store
-  clear: () => (this.items = []),           // ✗ arrow — `this` is NOT the store
+  add(item) { this.items.push(item); },     // ✓ method: `this` is the store
+  clear: () => (this.items = []),           // ✗ arrow: `this` is NOT the store
 });
 ```
 
-Mutating from outside an action works too — `cart.items = []` in a component handler is fine. Actions are a convention for keeping the logic next to the data, not a requirement.
+You can also change the store directly from a component (`cart.items = []`). Actions are just a nice way to keep the logic next to the data.
 
-:::note
-`store(init)` takes a **plain object** — the same rule as component `state`. Class instances aren't accepted as the store root.
-:::
+## Good to know
 
-One store per concern beats one giant store: each is just an export, so split freely (`cart.js`, `session.js`, `settings.js`) and let components import only what they read.
+- `store()` takes a **plain object** (`{ ... }`), like `state`. Class instances aren't allowed.
+- Make **one store per topic** instead of one giant store: `cart.js`, `session.js`, `settings.js`. Components import only what they need.
+- How updates work: [Store Reactivity](/docs/store-reactivity). When to use a store: [Store vs State vs Props](/docs/store-vs-state).
